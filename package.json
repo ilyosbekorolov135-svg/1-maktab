@@ -5,12 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "render-build": "npm install && npx prisma generate && npx prisma db push && vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "render-build": "npm install && npx prisma generate && npx prisma db push && vite build && esbuild server.ts --bundle --platform=node --format=esm --packages=external --sourcemap --outfile=dist/server.js",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=esm --packages=external --sourcemap --outfile=dist/server.js",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "start": "node dist/server.cjs"
+    "start": "node dist/server.js"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

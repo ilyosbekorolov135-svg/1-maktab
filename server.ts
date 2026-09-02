@@ -97,9 +97,9 @@ async function startServer() {
         });
       }
       res.json({ success: true });
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      res.status(500).json({ error: 'Sozlamani saqlashda xatolik' });
+      res.status(500).json({ error: 'Server xatosi', details: error.message });
     }
   });
 
@@ -125,9 +125,9 @@ async function startServer() {
       }));
       
       res.json(formattedSchools);
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      res.status(500).json({ error: 'Server xatosi' });
+      res.status(500).json({ error: 'Server xatosi', details: error.message, stack: error.stack });
     }
   });
 
@@ -367,8 +367,9 @@ async function startServer() {
         comments: r.comments ? JSON.parse(r.comments) : undefined
       }));
       res.json(formattedReviews);
-    } catch (error) {
-      res.status(500).json({ error: 'Server xatosi' });
+    } catch (error: any) {
+      console.error(error);
+      res.status(500).json({ error: 'Server xatosi', details: error.message });
     }
   });
 

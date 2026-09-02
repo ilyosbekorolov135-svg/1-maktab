@@ -19,6 +19,17 @@ async function startServer() {
   app.use(express.json({ limit: '20mb' }));
   app.use(express.urlencoded({ limit: '20mb', extended: true }));
 
+  // CORS middleware
+  app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(200);
+    }
+    next();
+  });
+
   // Rasm yuklash uchun multer sozlamalari
   const storage = multer.diskStorage({
     destination: (req, file, cb) => {
@@ -113,21 +124,39 @@ async function startServer() {
       const schools = await prisma.school.findMany({ orderBy: { id: 'asc' } });
       
       // JSON satrlarini yana haqiqiy JSON obyektlariga aylantiramiz (frontend xatosiz o'qishi uchun)
-      const formattedSchools = schools.map(s => ({
-        ...s,
-        ratingBreakdown: JSON.parse(s.ratingBreakdown),
-        achievements: JSON.parse(s.achievements),
-        notableTeachers: JSON.parse(s.notableTeachers),
-        talentedStudents: JSON.parse(s.talentedStudents || '[]'),
-        clubs: JSON.parse(s.clubs),
-        gallery: JSON.parse(s.gallery),
-        videos: s.videos ? JSON.parse(s.videos) : undefined
-      }));
+      const formattedSchools = schools.map(s => {
+        try {
+          return {
+            ...s,
+            ratingBreakdown: s.ratingBreakdown ? JSON.parse(s.ratingBreakdown) : {},
+            achievements: s.achievements ? JSON.parse(s.achievements) : [],
+            notableTeachers: s.notableTeachers ? JSON.parse(s.notableTeachers) : [],
+            talentedStudents: s.talentedStudents ? JSON.parse(s.talentedStudents) : [],
+            clubs: s.clubs ? JSON.parse(s.clubs) : [],
+            gallery: s.gallery ? JSON.parse(s.gallery) : [],
+            videos: s.videos ? JSON.parse(s.videos) : [],
+            bannerImage: s.bannerImage || 'https://images.unsplash.com/photo-1427504494785-cdafb3e4b979?w=1200&h=400&fit=crop'
+          };
+        } catch (parseError) {
+          console.error(`Error parsing school ${s.id}:`, parseError);
+          return {
+            ...s,
+            ratingBreakdown: {},
+            achievements: [],
+            notableTeachers: [],
+            talentedStudents: [],
+            clubs: [],
+            gallery: [],
+            videos: [],
+            bannerImage: 'https://images.unsplash.com/photo-1427504494785-cdafb3e4b979?w=1200&h=400&fit=crop'
+          };
+        }
+      });
       
       res.json(formattedSchools);
     } catch (error: any) {
-      console.error(error);
-      res.status(500).json({ error: 'Server xatosi', details: error.message, stack: error.stack });
+      console.error('Schools API Error:', error);
+      res.status(500).json({ error: 'Server xatosi', details: error.message });
     }
   });
 
@@ -164,7 +193,7 @@ async function startServer() {
           clubs: JSON.stringify(data.clubs || []),
           gallery: JSON.stringify(data.gallery || []),
           videos: data.videos ? JSON.stringify(data.videos) : null,
-          bannerImage: data.bannerImage,
+          bannerImage: data.bannerImage || 'https://images.unsplash.com/photo-1427504494785-cdafb3e4b979?w=1200&h=400&fit=crop',
           logoImage: data.logoImage || null,
           logoBg: data.logoBg || 'bg-blue-600 text-white',
           isFeatured: data.isFeatured || false,
@@ -362,10 +391,20 @@ async function startServer() {
   app.get('/api/reviews', async (req, res) => {
     try {
       const reviews = await prisma.review.findMany({ orderBy: { id: 'desc' } });
-      const formattedReviews = reviews.map(r => ({
-        ...r,
-        comments: r.comments ? JSON.parse(r.comments) : undefined
-      }));
+      const formattedReviews = reviews.map(r => {
+        try {
+          return {
+            ...r,
+            comments: r.comments ? JSON.parse(r.comments) : undefined
+          };
+        } catch (parseError) {
+          console.error(`Error parsing review ${r.id}:`, parseError);
+          return {
+            ...r,
+            comments: undefined
+          };
+        }
+      });
       res.json(formattedReviews);
     } catch (error: any) {
       console.error(error);
@@ -535,7 +574,8 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    app.use('/assets', express.static(path.join(distPath, 'assets')));
+    app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads')));
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
@@ -546,4 +586,7 @@ async function startServer() {
   });
 }
 
-startServer();
+startServer().catch(err => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
+});

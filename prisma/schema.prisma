@@ -1,0 +1,71 @@
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model School {
+  id                           Int      @id @default(autoincrement())
+  slug                         String   @unique
+  name                         String
+  fullName                     String
+  type                         String
+  region                       String
+  district                     String
+  location                     String
+  address                      String
+  phone                        String
+  email                        String
+  establishedYear              Int
+  director                     String
+  positivePercent              Int
+  reviewsCount                 Int
+  rank                         Int
+  districtRank                 Int
+  studentsCount                Int
+  teachersCount                Int
+  higherEducationAdmissionRate Int
+  olympiadWinnersCount         Int
+  ratingBreakdown              String   // JSON string
+  achievements                 String   // JSON string
+  notableTeachers              String   // JSON string
+  talentedStudents             String   @default("[]") // JSON string
+  clubs                        String   // JSON string
+  gallery                      String   // JSON string
+  videos                       String?  // JSON string
+  bannerImage                  String
+  logoImage                    String?
+  logoBg                       String
+  isFeatured                   Boolean  @default(false)
+  reviews                      Review[]
+}
+
+model Review {
+  id           Int      @id @default(autoincrement())
+  author       String
+  role         String
+  tagNumber    String
+  schoolId     Int
+  schoolName   String
+  authorDetail String
+  time         String
+  content      String
+  sentiment    String
+  category     String?
+  upvotes      Int      @default(0)
+  downvotes    Int      @default(0)
+  score        String
+  saved        Boolean  @default(false)
+  comments     String?  // JSON string for comments
+
+  school       School   @relation(fields: [schoolId], references: [id])
+}
+
+model SiteSettings {
+  id    Int    @id @default(autoincrement())
+  key   String @unique
+  value String
+}

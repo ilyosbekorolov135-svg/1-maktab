@@ -711,8 +711,20 @@ export default function App() {
         ]);
         const schoolsData = await schoolsRes.json();
         const reviewsData = await reviewsRes.json();
-        setSchools(schoolsData);
-        setReviews(reviewsData);
+        
+        if (Array.isArray(schoolsData)) {
+          setSchools(schoolsData);
+        } else {
+          console.error("Schools API Xatosi:", schoolsData);
+          setSchools([]); // fallback to empty array
+        }
+        
+        if (Array.isArray(reviewsData)) {
+          setReviews(reviewsData);
+        } else {
+          console.error("Reviews API Xatosi:", reviewsData);
+          setReviews([]); // fallback to empty array
+        }
       } catch (err) {
         console.error('Ma\'lumotlarni yuklab bo\'lmadi:', err);
         // Xatolik bo\'lsa, zaxira sifatida mahalliy ma\'lumotlarni ishlatamiz

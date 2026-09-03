@@ -1,17 +1,11 @@
 import 'dotenv/config';
 import express from 'express';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { PrismaClient } from '@prisma/client';
 import multer from 'multer';
 import fs from 'fs';
 
-let __dirname = process.cwd();
-try {
-  __dirname = path.dirname(fileURLToPath(import.meta.url));
-} catch {
-  __dirname = process.cwd();
-}
+const __dirname = process.cwd();
 
 function databaseUrl() {
   return (process.env.DATABASE_URL || '')
@@ -21,11 +15,17 @@ function databaseUrl() {
 }
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
-export const prisma =
-  globalForPrisma.prisma ??
-  new PrismaClient({
-    datasources: databaseUrl() ? { db: { url: databaseUrl() } } : undefined,
-  });
+function createPrisma() {
+  try {
+    return new PrismaClient({
+      datasources: databaseUrl() ? { db: { url: databaseUrl() } } : undefined,
+    });
+  } catch (error) {
+    console.error('Prisma init error:', error);
+    return new PrismaClient();
+  }
+}
+export const prisma = globalForPrisma.prisma ?? createPrisma();
 if (process.env.NODE_ENV !== 'production') {
   globalForPrisma.prisma = prisma;
 }
@@ -101,11 +101,14 @@ const storage = isServerless
 const upload = multer({ storage });
 
 app.get('/api/health', async (_req, res) => {
+  if (!databaseUrl()) {
+    return res.status(500).json({ ok: false, db: 'DATABASE_URL missing' });
+  }
   try {
     await prisma.$queryRaw`SELECT 1`;
     res.json({ ok: true, db: 'connected' });
-  } catch (error) {
-    res.status(500).json({ ok: false, db: 'disconnected' });
+  } catch (error: any) {
+    res.status(500).json({ ok: false, db: 'disconnected', message: error?.message || String(error) });
   }
 });
 
@@ -606,28 +609,16 @@ app.post('/api/upload', adminOnly, upload.single('image'), (req, res) => {
   });
 
 
-  // Faqat alohida server sifatida ishga tushganda (Vercel Serverless bo'lmaganda)
-  if (!process.env.VERCEL && !process.env.NOW_REGION) {
-    (async () => {
-      if (process.env.NODE_ENV !== 'production') {
-        const { createServer: createViteServer } = await import('vite');
-        const vite = await createViteServer({
-          server: { middlewareMode: true },
-          appType: 'spa',
-        });
-        app.use(vite.middlewares);
-      } else {
-        const distPath = path.join(process.cwd(), 'dist');
-        app.use(express.static(distPath));
-        app.get('*', (req, res) => {
-          res.sendFile(path.join(distPath, 'index.html'));
-        });
-      }
-
-      app.listen(PORT, "0.0.0.0", () => {
-        console.log(`Server running on port ${PORT}`);
-      });
-    })();
+  // Vercel serverless: Vite import qilinmaydi (function crash bo'lmasin)
+  if (!process.env.VERCEL && !process.env.NOW_REGION && process.env.NODE_ENV === 'production') {
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Server running on port ${PORT}`);
+    });
   }
 
 export default app;

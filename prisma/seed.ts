@@ -1,10 +1,17 @@
+import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import { SCHOOLS_DATA, INITIAL_REVIEWS } from '../src/data/schoolsData';
 
 const prisma = new PrismaClient();
 
+async function resetSequence(table: string) {
+  await prisma.$executeRawUnsafe(
+    `SELECT setval(pg_get_serial_sequence('"${table}"', 'id'), COALESCE((SELECT MAX(id) FROM "${table}"), 1))`
+  );
+}
+
 async function main() {
-  console.log('Seeding data into SQLite database...');
+  console.log('Seeding data into Neon PostgreSQL...');
 
   // Seed Schools
   for (const school of SCHOOLS_DATA) {
@@ -79,6 +86,10 @@ async function main() {
   }
 
   console.log('Reviews seeded successfully.');
+
+  await resetSequence('School');
+  await resetSequence('Review');
+  await resetSequence('SiteSettings');
 }
 
 main()

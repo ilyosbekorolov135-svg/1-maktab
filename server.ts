@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -5,16 +6,49 @@ import { PrismaClient } from '@prisma/client';
 import multer from 'multer';
 import fs from 'fs';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+let __dirname = process.cwd();
+try {
+  __dirname = path.dirname(fileURLToPath(import.meta.url));
+} catch {
+  __dirname = process.cwd();
+}
 
-// PostgreSQL ma'lumotlar bazasiga Prisma ORM orqali ulanish
-export const prisma = new PrismaClient();
+function databaseUrl() {
+  return (process.env.DATABASE_URL || '')
+    .replace(/&?channel_binding=require/g, '')
+    .replace(/\?&/, '?')
+    .replace(/\?$/, '');
+}
+
+const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
+export const prisma =
+  globalForPrisma.prisma ??
+  new PrismaClient({
+    datasources: databaseUrl() ? { db: { url: databaseUrl() } } : undefined,
+  });
+if (process.env.NODE_ENV !== 'production') {
+  globalForPrisma.prisma = prisma;
+}
 export const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ limit: '20mb', extended: true }));
+
+app.use((req, _res, next) => {
+  const headerPath = String(
+    req.headers['x-invoke-path'] ||
+    req.headers['x-forwarded-uri'] ||
+    req.headers['x-vercel-original-path'] ||
+    ''
+  ).split('?')[0];
+  const queryIndex = req.url.indexOf('?');
+  const query = queryIndex >= 0 ? req.url.slice(queryIndex) : '';
+  if (headerPath.startsWith('/api/') && !req.url.split('?')[0].startsWith('/api/')) {
+    req.url = headerPath + query;
+  }
+  next();
+});
 
 // CORS sozlamalari
 app.use((req, res, next) => {
@@ -28,8 +62,19 @@ app.use((req, res, next) => {
 });
 
 // URL normalizatsiya: /api/path va /path ikkalasini ham qo'llab-quvvatlaydi
+// Vite/static fayllarni qayta yozmaslik kerak, aks holda frontend oq ekranda qoladi
 app.use((req, res, next) => {
-  if (!req.url.startsWith('/api') && req.url !== '/' && !req.url.startsWith('/uploads')) {
+  const pathname = req.url.split('?')[0];
+  const isViteOrStatic =
+    pathname.startsWith('/src') ||
+    pathname.startsWith('/@') ||
+    pathname.startsWith('/node_modules') ||
+    pathname.startsWith('/uploads') ||
+    pathname.startsWith('/assets') ||
+    pathname.startsWith('/favicon') ||
+    /\.[a-zA-Z0-9]+$/.test(pathname);
+
+  if (!pathname.startsWith('/api') && pathname !== '/' && !isViteOrStatic) {
     req.url = '/api' + req.url;
   }
   next();
@@ -54,6 +99,15 @@ const storage = isServerless
     });
 
 const upload = multer({ storage });
+
+app.get('/api/health', async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ ok: true, db: 'connected' });
+  } catch (error) {
+    res.status(500).json({ ok: false, db: 'disconnected' });
+  }
+});
 
 // Yuklangan fayllarni public qilib ochish
 if (!isServerless) {

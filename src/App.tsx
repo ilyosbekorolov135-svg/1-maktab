@@ -705,10 +705,13 @@ export default function App() {
   useEffect(() => {
     async function loadData() {
       try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 12000);
         const [schoolsRes, reviewsRes] = await Promise.all([
-          fetch('/api/schools'),
-          fetch('/api/reviews'),
+          fetch('/api/schools', { signal: controller.signal }),
+          fetch('/api/reviews', { signal: controller.signal }),
         ]);
+        clearTimeout(timeout);
         const schoolsData = await schoolsRes.json();
         const reviewsData = await reviewsRes.json();
         

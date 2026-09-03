@@ -1,7 +1,6 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { createServer as createViteServer } from 'vite';
 import { PrismaClient } from '@prisma/client';
 import multer from 'multer';
 import fs from 'fs';
@@ -9,64 +8,80 @@ import fs from 'fs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// SQLite ma'lumotlar bazasiga Prisma ORM orqali ulanish
-const prisma = new PrismaClient();
+// PostgreSQL ma'lumotlar bazasiga Prisma ORM orqali ulanish
+export const prisma = new PrismaClient();
+export const app = express();
+const PORT = Number(process.env.PORT) || 3000;
 
-async function startServer() {
-  const app = express();
-  const PORT = Number(process.env.PORT) || 3000;
+app.use(express.json({ limit: '20mb' }));
+app.use(express.urlencoded({ limit: '20mb', extended: true }));
 
-  app.use(express.json({ limit: '20mb' }));
-  app.use(express.urlencoded({ limit: '20mb', extended: true }));
+// CORS sozlamalari
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
 
-  // CORS middleware
-  app.use((req, res, next) => {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    if (req.method === 'OPTIONS') {
-      return res.sendStatus(200);
-    }
-    next();
-  });
+// URL normalizatsiya: /api/path va /path ikkalasini ham qo'llab-quvvatlaydi
+app.use((req, res, next) => {
+  if (!req.url.startsWith('/api') && req.url !== '/' && !req.url.startsWith('/uploads')) {
+    req.url = '/api' + req.url;
+  }
+  next();
+});
 
-  // Rasm yuklash uchun multer sozlamalari
-  const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-      const uploadPath = path.join(__dirname, 'public', 'uploads');
-      if (!fs.existsSync(uploadPath)) {
-        fs.mkdirSync(uploadPath, { recursive: true });
+// Rasm yuklash uchun multer sozlamalari (Vercel serverless uchun xotira buferi, lokal uchun fayl tizimi)
+const isServerless = Boolean(process.env.VERCEL || process.env.NOW_REGION);
+const storage = isServerless
+  ? multer.memoryStorage()
+  : multer.diskStorage({
+      destination: (req, file, cb) => {
+        const uploadPath = path.join(__dirname, 'public', 'uploads');
+        if (!fs.existsSync(uploadPath)) {
+          fs.mkdirSync(uploadPath, { recursive: true });
+        }
+        cb(null, uploadPath);
+      },
+      filename: (req, file, cb) => {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        cb(null, uniqueSuffix + path.extname(file.originalname));
       }
-      cb(null, uploadPath);
-    },
-    filename: (req, file, cb) => {
-      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-      cb(null, uniqueSuffix + path.extname(file.originalname));
-    }
-  });
-  const upload = multer({ storage });
+    });
 
-  // Yuklangan fayllarni public qilib ochish
+const upload = multer({ storage });
+
+// Yuklangan fayllarni public qilib ochish
+if (!isServerless) {
   app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
+}
 
-  // =====================
-  // XAVFSIZLIK (Security)
-  // =====================
-  const adminOnly = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    const token = req.headers['authorization'];
-    if (token !== 'Bearer admin-token-123') {
-      return res.status(403).json({ error: 'Ruxsat yo\'q. Avval tizimga kiring.' });
-    }
-    next();
-  };
+// =====================
+// XAVFSIZLIK (Security)
+// =====================
+const adminOnly = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const token = req.headers['authorization'];
+  if (token !== 'Bearer admin-token-123') {
+    return res.status(403).json({ error: 'Ruxsat yo\'q. Avval tizimga kiring.' });
+  }
+  next();
+};
 
-  // Rasm yuklash API'si
-  app.post('/api/upload', adminOnly, upload.single('image'), (req, res) => {
-    if (!req.file) {
-      return res.status(400).json({ error: 'Rasm yuklanmadi' });
-    }
-    res.json({ url: `/uploads/${req.file.filename}` });
-  });
+// Rasm yuklash API'si
+app.post('/api/upload', adminOnly, upload.single('image'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'Rasm yuklanmadi' });
+  }
+  if (req.file.buffer) {
+    const base64 = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+    return res.json({ url: base64 });
+  }
+  res.json({ url: `/uploads/${req.file.filename}` });
+});
 
   // =====================
   // SAYT SOZLAMALARI (SITE SETTINGS) API
@@ -124,39 +139,21 @@ async function startServer() {
       const schools = await prisma.school.findMany({ orderBy: { id: 'asc' } });
       
       // JSON satrlarini yana haqiqiy JSON obyektlariga aylantiramiz (frontend xatosiz o'qishi uchun)
-      const formattedSchools = schools.map(s => {
-        try {
-          return {
-            ...s,
-            ratingBreakdown: s.ratingBreakdown ? JSON.parse(s.ratingBreakdown) : {},
-            achievements: s.achievements ? JSON.parse(s.achievements) : [],
-            notableTeachers: s.notableTeachers ? JSON.parse(s.notableTeachers) : [],
-            talentedStudents: s.talentedStudents ? JSON.parse(s.talentedStudents) : [],
-            clubs: s.clubs ? JSON.parse(s.clubs) : [],
-            gallery: s.gallery ? JSON.parse(s.gallery) : [],
-            videos: s.videos ? JSON.parse(s.videos) : [],
-            bannerImage: s.bannerImage || 'https://images.unsplash.com/photo-1427504494785-cdafb3e4b979?w=1200&h=400&fit=crop'
-          };
-        } catch (parseError) {
-          console.error(`Error parsing school ${s.id}:`, parseError);
-          return {
-            ...s,
-            ratingBreakdown: {},
-            achievements: [],
-            notableTeachers: [],
-            talentedStudents: [],
-            clubs: [],
-            gallery: [],
-            videos: [],
-            bannerImage: 'https://images.unsplash.com/photo-1427504494785-cdafb3e4b979?w=1200&h=400&fit=crop'
-          };
-        }
-      });
+      const formattedSchools = schools.map(s => ({
+        ...s,
+        ratingBreakdown: JSON.parse(s.ratingBreakdown),
+        achievements: JSON.parse(s.achievements),
+        notableTeachers: JSON.parse(s.notableTeachers),
+        talentedStudents: JSON.parse(s.talentedStudents || '[]'),
+        clubs: JSON.parse(s.clubs),
+        gallery: JSON.parse(s.gallery),
+        videos: s.videos ? JSON.parse(s.videos) : undefined
+      }));
       
       res.json(formattedSchools);
     } catch (error: any) {
-      console.error('Schools API Error:', error);
-      res.status(500).json({ error: 'Server xatosi', details: error.message });
+      console.error(error);
+      res.status(500).json({ error: 'Server xatosi', details: error.message, stack: error.stack });
     }
   });
 
@@ -193,7 +190,7 @@ async function startServer() {
           clubs: JSON.stringify(data.clubs || []),
           gallery: JSON.stringify(data.gallery || []),
           videos: data.videos ? JSON.stringify(data.videos) : null,
-          bannerImage: data.bannerImage || 'https://images.unsplash.com/photo-1427504494785-cdafb3e4b979?w=1200&h=400&fit=crop',
+          bannerImage: data.bannerImage,
           logoImage: data.logoImage || null,
           logoBg: data.logoBg || 'bg-blue-600 text-white',
           isFeatured: data.isFeatured || false,
@@ -391,20 +388,10 @@ async function startServer() {
   app.get('/api/reviews', async (req, res) => {
     try {
       const reviews = await prisma.review.findMany({ orderBy: { id: 'desc' } });
-      const formattedReviews = reviews.map(r => {
-        try {
-          return {
-            ...r,
-            comments: r.comments ? JSON.parse(r.comments) : undefined
-          };
-        } catch (parseError) {
-          console.error(`Error parsing review ${r.id}:`, parseError);
-          return {
-            ...r,
-            comments: undefined
-          };
-        }
-      });
+      const formattedReviews = reviews.map(r => ({
+        ...r,
+        comments: r.comments ? JSON.parse(r.comments) : undefined
+      }));
       res.json(formattedReviews);
     } catch (error: any) {
       console.error(error);
@@ -565,28 +552,28 @@ async function startServer() {
   });
 
 
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use('/assets', express.static(path.join(distPath, 'assets')));
-    app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads')));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+  // Faqat alohida server sifatida ishga tushganda (Vercel Serverless bo'lmaganda)
+  if (!process.env.VERCEL && !process.env.NOW_REGION) {
+    (async () => {
+      if (process.env.NODE_ENV !== 'production') {
+        const { createServer: createViteServer } = await import('vite');
+        const vite = await createViteServer({
+          server: { middlewareMode: true },
+          appType: 'spa',
+        });
+        app.use(vite.middlewares);
+      } else {
+        const distPath = path.join(process.cwd(), 'dist');
+        app.use(express.static(distPath));
+        app.get('*', (req, res) => {
+          res.sendFile(path.join(distPath, 'index.html'));
+        });
+      }
+
+      app.listen(PORT, "0.0.0.0", () => {
+        console.log(`Server running on port ${PORT}`);
+      });
+    })();
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on port ${PORT}`);
-  });
-}
-
-startServer().catch(err => {
-  console.error('Failed to start server:', err);
-  process.exit(1);
-});
+export default app;
